@@ -2,24 +2,26 @@
 # Requires GitHub CLI (gh) to be installed and authenticated
 
 gh_notifications_cleanup() {
-    notifications=$(gh api notifications --jq '.[] | select(.reason == "review_requested") | {id: .id, repository: .repository.full_name, url: .subject.url, title: .subject.title}')
+    notifications_response=$(gh api notifications --paginate --slurp)
+    notifications=$(echo "$notifications_response" | jq 'flatten | .[] | {id: .id, repository: .repository.full_name, url: .subject.url, title: .subject.title}')
+
     if [[ -z "$notifications" ]]; then
         log "No pull request notifications found."
         exit 0
     fi
+
     echo "$notifications" | jq -c '.' | while read -r notification; do
         pr_url=$(echo "$notification" | jq -r '.url')
-        pr_merged=$(gh api "$pr_url" --jq '.merged')
+        pr_state=$(gh api "$pr_url" --jq '.state')
         pr_title=$(echo "$notification" | jq -r '.title')
         notification_id=$(echo "$notification" | jq -r '.id')
         repo=$(echo "$notification" | jq -r '.repository')
         
-        if [[ "$pr_merged" == "true" ]]; then
-            gh api "notifications/threads/$notification_id" -X PATCH --silent
-            echo "✓ Marked notification as read: PR #$pr_title in $repo (merged)"
+        if [[ "$pr_state" == "closed" ]]; then
+            gh api "notifications/threads/$notification_id" -X DELETE --silent
+            echo "✓ Deleted notification for: PR #$pr_title in $repo"
         else
-            echo "- Keeping notification: PR #$pr_title in $repo (not merged)"
+            echo "- Keeping notification for: PR #$pr_title in $repo"
         fi
     done
 }
-
